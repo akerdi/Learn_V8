@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "options": {
+      "cwd": "${workspaceFolder}"
+  },
+  "tasks": [
+      {
+          "label": "build_standalone",
+          "type": "shell",
+          "command": "sh",
+          "args": [
+            "build.sh"
+          ]
+      },
+      {
+          "label": "cmake",
+          "type": "shell",
+          "command": "cmake",
+          "args": [
+              "-S",
+              ".",
+              "-B",
+              "cmake-build-debug",
+              "-DCMAKE_BUILD_TYPE=Debug"
+          ]
+      },
+      {
+          "label": "make",
+          "dependsOn": ["cmake"],
+          "command": "cmake",
+          "args":[
+            "--build",
+            "cmake-build-debug"
+          ]
+      },
+      {
+          "label":"CMake Build",
+          "dependsOn":[
+            "cmake",
+            "make"
+          ]
+      }
+  ]
+}

@@ -1,0 +1,4 @@
+.vscode/*
+!.vscode/launch.example.json
+!.vscode/tasks.example.json
+cmake-build-debug
