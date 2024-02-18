@@ -6,8 +6,8 @@
 #include <map>
 #include <string>
 
-#include "include/v8.h"
-#include "include/libplatform/libplatform.h"
+#include "../include/v8.h"
+#include "../include/libplatform/libplatform.h"
 
 using namespace std;
 using namespace v8;

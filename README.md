@@ -340,6 +340,8 @@ int main(int argc, char* argv[]) {
 +};
 +void GetPointX(Local<String> property, const PropertyCallbackInfo<Value>& info) {
 +  printf("GetPointX is calling\n");
++  // 为什么使用info.This()?
++  // https://stackoverflow.com/a/34257459
 +  Local<Object> self = info.This();
 +  Local<External> wrap = Local<External>::Cast(self->GetInternalField(0));
 +  void* ptr = wrap->Value();
@@ -398,6 +400,385 @@ Local<ObjectTemplate> initializeGlobal(Isolate* isolate) {
 
 待续...
 
+### 6.ProcessOn
+
+ProcessOn 是v8的第三个Sample(Hello-world / Shell / ProcessOn). ProcessOn 实现ObjectTemplate / FunctionTemplate, 并且最终在执行Js脚本后得到Js的Process方法，并且进行运行。
+
+运行 processon_maptemplate 时，使用脚本map.js:
+
+    ./processon verbose=true map.js
+
+运行 processon_requesttemplate 时，使用脚本count-host.js:
+
+    ./processon verbose=true count-host.js
+
+#### 6.1ProcessOn_MapTemplate
+
+ProcessOn Sample 和之前 Hello World 和 Shell 的Sample 差不多的模板，从 main 开始: -> 读取"环境变量" -> 创建Isolate 及设置Scope(内存回收模块) -> 读取文件内容入 "Local<String> source" -> processor.Initialize(使用maptemplate 生成map，映射到options 和 output) -> PrintMap.
+
+<!-- 首先是`typedef map<string, string> StringStringMap;` StringStringMap  -->
+开始的读取文件Readfile:
+
+```cpp
+MaybeLocal<String> Readfile(Isolate* isolate, const string& name) {
+  FILE* file = fopen(name.c_str(), "rb");
+  if (file == NULL) {
+    return MaybyLocal<String>();
+  }
+  fseek(file, 0, SEEK_END);
+  size_t size = ftell(file);
+  rewind(file);
+
+  std::unique_ptr<char> chars(new char[size+1]);
+  chars.get()[size] = '\0';
+  for (int i = 0; i < size; i++) {
+    i += fread(chars.get() + i, 1, size-i, file);
+    if (ferror(file)) {
+      fclose(file);
+      return MaybeLocal<String>();
+    }
+  }
+  fclose(file);
+  MaybeLocal<String> result = String::NewFromUtf8(
+    isolate, chars.get(), NewStringType::kNormal, static_cast<int>(size)
+  );
+  return result;
+}
+```
+
+将生成的 isolate 和 Readfile 读取到的脚本文件内容，传入到 processor 对象中: `JsHttpRequestProcessor processor(isolate, source)`. 接下来调用 `processor.Initialize(&options, &output)`:
+
+```cpp
+static void LogCallback(const v8::FunctionCallbackInfo<Value>& info) {
+  if (info.Length() < 1) return;
+
+  Isolate* isolate = info.GetIsolate();
+  HandleScope scope(isolate);
+  // 获取第一个argument
+  Local<Value> arg = info[0];
+  if (arg->IsMap()) { // 识别js的map
+    Local<Map> aMap = arg.As<Map>();
+    Local<Array> array = aMap->AsArray();
+    uint32_t length = array->Length();
+    uint32_t halfLength = length / 2;
+    for (int32_t i = 0; i < halfLength; i++) {
+      Local<Value> key = array->Get(isolate->GetCurrentContext(), i).ToLolcalChecked();
+      Local<Value> value = array->Get(isolate->GetCurrentContext(), i+halfLength).ToLocalChecked();
+      String::Utf8Value keyStr(isolate, key);
+      String::Utf8Value valueStr(isolate, value);
+      string str(*keyStr); str.append(":"); str.append(*valueStr);
+      HttpRequestProcessor::Log(str.c_str());
+    }
+  } else if (arg->IsString()) { // 识别js的string
+    String::Utf8Value strValue(isolate, arg);
+    HttpRequestProcessor::Log(strValue.c_str());
+  } else if (arg->IsObject()) { // 识别cpp映射的External 包着的map对象
+    // 由于是 object，则 Local<Value> 需要调用 ToObject 转化为 Local<Object>
+    Local<Object> argObj = arg->ToObject(isolate->GetCurrentContext()).ToLocalChecked();
+    // 通过 GetInternalField 拿到External 实例，然后通过As将类型转化Local<Value>, 然后再As转化为Local<External>
+    Local<External> field = argObj->GetInternalField(0).As<Value>().As<External>();
+    void* ptr = field->Value();
+    StringStringMap* obj = static_cast<StringStringMap*>(ptr);
+    for (const auto& pair : *obj) {
+      string str(pair.first);
+      str.append(pair.second);
+      HttpRequestProcessor::Log(str.c_str());
+    }
+  }
+}
+bool JsHttpRequestProcessor::Initialize(StringStringMap* opts, StringStringMap* output) {
+  // 创建一个handle scope 去管理临时变量
+  HandleScope handle_scope(GetIsolate());
+  // 生成一个临时的全局object，这个对象用来设置built-in 内置的全局方法
+  Local<ObjectTemplate> global = ObjectTemplate::New(GetIsolate());
+  // 设置built-in log 方法
+  global->Set(GetIsolate(), "log", FunctionTemplate::New(GetIsolate(), LogCallback));
+
+  // 不同的处理进程 获取他自己的上下文，以此来让不同的进程不会互相影响。Context::New 返回一个persistent handle，这个新的上下文就是我们需要的。
+  // Context::New 这种方式是在指定的Isolate 实例中创建一个新的上下文。新的上下文将具有一个全新的全局对象，即不会共享之前上下文的任何全局对象。
+  // Local<Context> local_context(global_context) 通过拷贝已存在的`Local<Context>`对象来创建一个新的`Local<Context>`。新的上下文与被拷贝的上下文共享相同的全局对象。
+  Local<Context> context = Context::New(GetIsolate(), NULL, global);
+  // 将新的上下文设置到全局 context_
+  context_.Reset(GetIsolate(), context);
+
+  // 由于上下文修改了，这一句则会进入这个新的上下文。这样的话，接下来所有的操作都会在这个Context::Scope 中。
+  Context::Scope context_scope(context);
+
+  // 将opts 和output 这两个map 映射到js中来使用
+  if (!InstallMaps(opts, output)) return false;
+  // 编译和运行这个 脚本内容
+  if (!ExecuteScript(script_)) return false;
+
+  return true;
+}
+```
+
+开始映射opts 和output这两个map:
+
+```cpp
+bool JsHttpRequestProcess::InstallMaps(StringStringMap* opts, StringStringMap* output) {
+  HandleScope handle_scope(GetIsolate());
+  Local<Context> context = Local<Context>::New(GetIsolate(), context_);
+
+  // 包裹opts 至js
+  Local<Object> opts_obj = WrapMap(opts);
+  Local<Object> output_obj = WrapMap(output);
+  // 设置opts 和output 到全局变量
+  context->Global()
+    ->Set(context, String::NewFromUtf8Literal(GetIsolate(), "options"), opts_obj).FromJust();
+  context->Global()
+    ->Set(context, String::NewFromUtf8Literal(GetIsolate(), "output"), output_obj).FromJust();
+  return true;
+}
+Local<Object> JsHttpRequestProcessor::WrapMap(StringStringMap* obj) {
+  // 通过EscapableHandleScope 实现本地的域作为临时控制域
+  EscapableHandleScope handle_scope(GetIsolate());
+  // 如果全局map的模板是空的，则前往创建map模板
+  if (map_template_.IsEmpty()) {
+    Local<ObjectTemplate> raw_template = MakeMapTemplate(GetIsolate());
+    map_template_.Reset(GetIsolate(), raw_template);
+  }
+  // 通过Global<ObjectTemplate> 全局模板生成本地的模板
+  Local<ObjectTemplate> templ = Local<ObjectTemplate>::New(GetIsolate(), map_template_);
+  // 通过本地模板创建实例
+  Local<Object> result = templ->NewInstance(GetIsolate()->GetCurrentContext()).ToLocalChecked();
+  // 使用External 包括cpp 指针(External 就是用来包裹void* 的指针)
+  Local<External> map_ptr = External::New(GetIsolate(), obj);
+  // 设置内部第0字段 为Local<External>
+  result->SetInternalField(0, map_ptr);
+  // 使用临时控制域将创建的实例返回去
+  return handle_scope.Escape(result);
+}
+void JsHttpRequestProcessor::MapGet(Local<Name> name, const PropertyCallbackInfo<Value>& info) {
+  ...
+}
+void JsHttpRequestProcessor::MapSet(Local<Name> name, Local<Value> value_obj, const PropertyCallbackInfo<Value>& info) {
+  ...
+}
+Local<ObjectTemplate> JsHttpRequestProcessor::MakeMapTemplate(Isolate* isolate) {
+  EscapableHandleScope handle_scope(isolate);
+
+  Local<ObjectTemplate> result = ObjectTemplate::New(isolate);
+  result->SetInternalFieldCount(1);
+  result->SetHandler(NamedPropertyHandlerConfiguration(MapGet, MapSet));
+
+  return handle_scope.Escape(result);
+}
+```
+
+以上通过 `MakeMapTemplate` 创建好对象模板，并且设置好字段数(SetInternalFieldCount) 为1，并且设置好使用的Map 的get 和set. 放到全局模板后，由全局模板转为本地模板，然后通过本地模板生成对象实例。
+
+下来我们来实现get 和set:
+
+```cpp
+// Local<Object> 转化为map<string, string>
+StringStringMap* JsHttpRequestProcessor::UnwrapMap(Local<Object> obj) {
+  Local<External> field = obj->GetInternalField(0).As<Value>().As<External>();
+  void* ptr = field->Value();
+  return static_cast<StringStringMap*>(ptr);
+}
+// Local<Value> 转化为string
+string ObjectToString(Isolate* isolate, Local<Value> value) {
+  String::Utf8Value str_value(isolate, value);
+  return string(*str_value);
+}
+void JsHttpRequestProcessor::MapGet(Local<Name> name, const PropertyCallbackInfo<Value>& info) {
+  if (name->IsSymbol()) return;
+
+  // 从info.Holder()获取到map<string, string>
+  StringStringMap* obj = UnwrapMap(info.Holder());
+  string key = ObjectToString(info.GetIsolate(), name);
+  StringStringMap::iterator iter = obj->find(key);
+  if (iter == obj->end()) return;
+
+  const string& value = (*iter).second;
+  info.GetReturnValue().Set(
+    String::NewFromUtf8(info.GetIsolate(), value.c_str(), NewStringType::kNormal, static_cast<int>(value.length())).ToLocalChecked()
+  );
+}
+void JsHttpRequestProcess::MapSet(Local<Name> name, Local<Value> value_obj, const PropertyCallbackInfo<Value>& info) {
+  if (name->IsSymbol()) return;
+
+  StringStringMap* obj = UnwrapMap(info.Holder());
+  string key = ObjectToString(info.GetIsolate(), name.As<String>());
+  string value = ObjectToString(info.GetIsolate(), value_obj.As<String>());
+  (*obj)[key] = value;
+  info.GetReturnValue().Set(value_obj);
+}
+```
+
+以上实现了cpp 的map 映射至js中。
+
+#### 6.2ProcessOn_RequestTemplate
+
+<!-- 这个区别与6.1 的区别是在 processor.Initialize. -->
+
+这个阶段是准备阶段，准备好了 request 的模板创建方法:
+
+```cpp
+class HttpRequest {
+public:
+ virtual ~HttpRequest() {}
+ virtual const string& Path() = 0;
+};
+// class HttpRequestProcessor {
+// private:
+// + Local<Object> WrapRequest(HttpRequest* obj);
+// + static HttpRequest* UnwrapRequest(Local<Object> obj);
+// + static void GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info);
+// + static Local<ObjectTemplate> MakeRequestTemplate(Isolate* isolate);
+
+// + static Global<ObjectTemplate> request_template_;
+// };
+Global<ObjectTemplate> JsHttpRequestProcessor::request_template_;
+Local<Object> JsHttpRequestProcessor::WrapRequest(HttpRequest* request) {
+  EscapableHandleScope handle_scope(GetIsolate());
+
+  if (request_template_.IsEmpty()) {
+    Local<ObjectTemplate> raw_template = MakeRequestTemplate(GetIsolate());
+    request_template_.Reset(GetIsolate(), raw_template);
+  }
+  Local<ObjectTemplate> templ = Local<ObjectTemplate>::New(GetIsolate(), request_template_);
+  Local<Object> result = templ->NewInstance(GetIsolate()->GetCurrentContext()).ToLocalChecked();
+  Local<External> request_ptr = External::New(GetIsolate(), request);
+  result->SetInternalField(0, request_ptr);
+  return handle_scope.Escape(result);
+}
+HttpRequest* JsHttpRequestProcessor::UnwrapRequest(Local<Object> obj) {
+  Local<External> field = obj->GetInternalField(0).As<Value>().As<External>();
+  void* ptr = field->Value();
+  return static_cast<HttpRequest*>(ptr);
+}
+void JsHttpRequestProcessor::GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info) {
+  HttpRequest* request = UnwrapRequest(info.Holder());
+  const string& path = request->Path();
+  info.GetReturnValue().Set(
+    String::NewFromUtf8(
+      info.GetIsolate(),
+      path.c_str(),
+      NewStringType::kInternalized,
+      static_cast<int>(path.length())
+    ).ToLocalChecked()
+  );
+}
+Local<ObjectTemplate> JsHttpRequestProcessor::MakeRequestTemplate(Isolate* isolate) {
+  EscapableHandleScope handle_scope(isolate);
+  Local<ObjectTemplate> result = ObjectTemplate::New(isolate);
+  result->SetInternalFieldCount(1);
+  result->SetAccessor(String::NewFromUtf8Literal(isolate, "path", NewStringType::kInternalized), GetPath);
+  return handle_scope.Escape(result);
+}
+class StringHttpRequest: public HttpRequest {
+public:
+  StringHttpRequest(const string& path);
+  virtual const string& Path() { return path_; }
+private:
+  string path_;
+};
+StringHttpRequest::StringHttpRequest(const string& path):path_(path) {}
+
+const int kSampleSize = 6;
+StringHttpRequest kSampleRequests[kSampleSize] = {
+  StringHttpRequest("/process.cc"),
+  StringHttpRequest("/"          ),
+  StringHttpRequest("/"          ),
+  StringHttpRequest("/"          ),
+  StringHttpRequest("/"          ),
+  StringHttpRequest("/"          )
+};
+```
+
+以上完成了request 的映射。
+
+#### 6.3.ProcessOn_Process
+
+ProcessOn_Process 实现了读取js的Process 方法，然后在cpp 中运行: `./processon verbose=true count-host.js`.
+
+```cpp
+class HttpRequestProcess {
+public:
+  ...
++ virtual bool Process(HttpRequest* req) = 0;
+};
+class JsHttpRequestProcessor: public HttpRequestProcessor {
+public:
+  ...
++ virtual bool Process(HttpRequest* req);
+private:
++ Global<Function> process_;
+  ...
+};
+bool JsHttpRequestProcessor::Initialize(STringStringMap* opts, StringStringMap* output) {
+  ...
+  if (!ExecuteScript(script_)) return false;
+  // 在执行完js 后，上下文Context 就已经有js中的Process方法
+  // 从中取出后保存到 `Global<Function> process_;` 中
++ Local<String> process_name = String::NewFromUtf8Literal(GetIsolate(), "Process");
++ Local<Value> process_val;
++ if (!context->Global()->Get(context, process_name).ToLocal(&process_val) ||
++     !process_val->IsFunction()) {
++   return false;
++ }
++ Local<Function> process_fun = process_val.As<Function>();
++ process_.Reset(GetIsolate(), process_fun);
+
+  return true;
+}
++bool JsHttpRequestProcessor::Process(HttpRequest* request) {
++ HandleScope handle_scope(GetIsolate());
++ Local<Context> context = Local<Context>::New(GetIsolate(), context_);
+  // 进入这个执行的上下文，这样之后操作的都在其中
++ Context::Scope context_scope(context);
+
+  // 将request 包裹为js 引用
++ Local<Object> request_obj = WrapRequest(request);
+  // 在调用Process 方法之前设置一个报错的句柄
++ TryCatch try_catch(GetIsolate());
+
++ const int argc = 1;
++ Local<Value> argv[argc] = { request_obj };
++ Local<Function> process = Local<Function>::New(GetIsolate(), process_);
++ Local<Object> result;
++ if (!process->Call(context, process, argc, argv).ToLocal(&result)) {
++   String::Utf8Value error(GetIsolate(), try_catch.Exception());
++   Log(*error);
++   return false;
++ }
++ return true;
++}
++JsHttpRequestProcessor::~JsHttpRequestProcessor() {
++ context_.Reset();
++ process_.Reset();
++}
+```
+
+方法 Initialize 在执行了js脚本后，context 就已经获得了js脚本中的Process 方法。那么接下来从context->Global 中拿到了process方法，并保存到 `Global<Function>`中。
+
+当cpp中调用 `bool(*JsHttpRequestProcessor::Process)(HttpRequest* request)` 方法时发送参数。
+
+调用过程:
+
+```cpp
++bool ProcessEntries(Isolate* isolate, v8::Platform* platform,
++                   HttpRequestProcessor* processor,
++                   int count, StringHttpRequest* reqs) {
++ for (int i = 0; i < count; i++) {
++   bool result = processor->Process(&reqs[i]);
++   while (v8::platform::PumpMessageLoop(platform, isolate)) continue;
++   if (!result) return false;
++ }
++ return true;
++}
+int main(int argc, char* argv[]) {
+  ...
++ if (!ProcessEntries(isolate, platform.get(), &processor, kSampleSize, kSampleRequests)) {
++   return 1;
++ }
+}
+```
+
+上方在 `main` 方法中调用 `ProcessEntries` 方法，其中调用了 `processor->Process(&reqs[i])`.
+
 ## Ref
 
 [v8 build](https://v8.dev/docs/build)
@@ -413,3 +794,7 @@ Local<ObjectTemplate> initializeGlobal(Isolate* isolate) {
 [V8配置与常用调试](https://www.sec4.fun/2020/06/12/v8Config/)
 
 [如何正确地使用v8嵌入到我们的C++应用中](https://juejin.cn/post/6844903956125057031)
+
+[V8 相关整理](https://zhuanlan.zhihu.com/p/399822509)
+
+[nodesource resource](https://v8docs.nodesource.com/node-4.8/d2/d5c/classv8_1_1_map.html)

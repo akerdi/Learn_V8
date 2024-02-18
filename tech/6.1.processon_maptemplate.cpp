@@ -6,25 +6,18 @@
 #include <map>
 #include <string>
 
-#include "include/v8.h"
-#include "include/libplatform/libplatform.h"
+#include "../include/v8.h"
+#include "../include/libplatform/libplatform.h"
 
 using namespace std;
 using namespace v8;
 
 typedef map<string, string> StringStringMap;
 
-class HttpRequest {
-public:
-  virtual ~HttpRequest() {}
-  virtual const string& Path() = 0;
-};
-
 class HttpRequestProcessor {
 public:
   virtual ~HttpRequestProcessor() {}
   virtual bool Initialize(StringStringMap* options, StringStringMap* output) = 0;
-  virtual bool Process(HttpRequest* req) = 0;
   static void Log(const char* event);
 };
 
@@ -33,7 +26,6 @@ public:
   JsHttpRequestProcessor(Isolate* isolate, Local<String> script):isolate_(isolate), script_(script) {}
   virtual ~JsHttpRequestProcessor();
   virtual bool Initialize(StringStringMap* opts, StringStringMap* output);
-  virtual bool Process(HttpRequest* req);
 
 private:
   bool InstallMaps(StringStringMap* opts, StringStringMap* output);
@@ -45,19 +37,12 @@ private:
   static void MapSet(Local<Name> name, Local<Value> value, const PropertyCallbackInfo<Value>& info);
   static Local<ObjectTemplate> MakeMapTemplate(Isolate* isolate);
 
-  Local<Object> WrapRequest(HttpRequest* obj);
-  static HttpRequest* UnwrapRequest(Local<Object> obj);
-  static void GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info);
-  static Local<ObjectTemplate> MakeRequestTemplate(Isolate* isolate);
-
   Isolate* GetIsolate() { return isolate_; }
 
   Isolate* isolate_;
   Local<String> script_;
   Global<Context> context_;
-  Global<Function> process_;
   static Global<ObjectTemplate> map_template_;
-  static Global<ObjectTemplate> request_template_;
 };
 
 StringStringMap* JsHttpRequestProcessor::UnwrapMap(Local<Object> obj) {
@@ -85,7 +70,9 @@ static void LogCallback(const v8::FunctionCallbackInfo<Value>& info) {
       Local<Value> value = array->Get(isolate->GetCurrentContext(), i+halfLength).ToLocalChecked();
       String::Utf8Value keyStr(isolate, key);
       String::Utf8Value valueStr(isolate, value);
-      string str(*keyStr); str.append(":"); str.append(*valueStr);
+      string str(*keyStr);
+      str.append(":");
+      str.append(*valueStr);
       HttpRequestProcessor::Log(str.c_str());
     }
   } else if (arg->IsString()) {
@@ -115,34 +102,6 @@ bool JsHttpRequestProcessor::Initialize(StringStringMap* opts, StringStringMap* 
   if (!InstallMaps(opts, output)) return false;
   if (!ExecuteScript(script_)) return false;
 
-  Local<String> process_name = String::NewFromUtf8Literal(GetIsolate(), "Process");
-  Local<Value> process_val;
-  if (!context->Global()->Get(context, process_name).ToLocal(&process_val) ||
-      !process_val->IsFunction()) {
-    return false;
-  }
-  Local<Function> process_fun = process_val.As<Function>();
-  process_.Reset(GetIsolate(), process_fun);
-
-  return true;
-}
-bool JsHttpRequestProcessor::Process(HttpRequest* request) {
-  HandleScope handle_scope(GetIsolate());
-  Local<Context> context = Local<Context>::New(GetIsolate(), context_);
-  Context::Scope context_scope(context);
-
-  Local<Object> request_obj = WrapRequest(request);
-  TryCatch try_catch(GetIsolate());
-
-  const int argc = 1;
-  Local<Value> argv[argc] = { request_obj };
-  Local<Function> process = Local<Function>::New(GetIsolate(), process_);
-  Local<Value> result;
-  if (!process->Call(context, process, argc, argv).ToLocal(&result)) {
-    String::Utf8Value error(GetIsolate(), try_catch.Exception());
-    Log(*error);
-    return false;
-  }
   return true;
 }
 bool JsHttpRequestProcessor::ExecuteScript(Local<String> script) {
@@ -221,72 +180,13 @@ Local<ObjectTemplate> JsHttpRequestProcessor::MakeMapTemplate(Isolate* isolate) 
 
 JsHttpRequestProcessor::~JsHttpRequestProcessor() {
   context_.Reset();
-  process_.Reset();
 }
 
-Global<ObjectTemplate> JsHttpRequestProcessor::request_template_;
 Global<ObjectTemplate> JsHttpRequestProcessor::map_template_;
-
-Local<Object> JsHttpRequestProcessor::WrapRequest(HttpRequest* request) {
-  EscapableHandleScope handle_scope(GetIsolate());
-
-  if (request_template_.IsEmpty()) {
-    Local<ObjectTemplate> raw_template = MakeRequestTemplate(GetIsolate());
-    request_template_.Reset(GetIsolate(), raw_template);
-  }
-  Local<ObjectTemplate> templ = Local<ObjectTemplate>::New(GetIsolate(), request_template_);
-  Local<Object> result = templ->NewInstance(GetIsolate()->GetCurrentContext()).ToLocalChecked();
-  Local<External> request_ptr = External::New(GetIsolate(), request);
-  result->SetInternalField(0, request_ptr);
-  return handle_scope.Escape(result);
-}
-HttpRequest* JsHttpRequestProcessor::UnwrapRequest(Local<Object> obj) {
-  Local<External> field = obj->GetInternalField(0).As<Value>().As<External>();
-  void* ptr = field->Value();
-  return static_cast<HttpRequest*>(ptr);
-}
-void JsHttpRequestProcessor::GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info) {
-  HttpRequest* request = UnwrapRequest(info.Holder());
-  const string& path = request->Path();
-  info.GetReturnValue().Set(
-    String::NewFromUtf8(
-      info.GetIsolate(),
-      path.c_str(),
-      NewStringType::kInternalized,
-      static_cast<int>(path.length())
-    ).ToLocalChecked()
-  );
-}
-Local<ObjectTemplate> JsHttpRequestProcessor::MakeRequestTemplate(Isolate* isolate) {
-  EscapableHandleScope handle_scope(isolate);
-  Local<ObjectTemplate> result = ObjectTemplate::New(isolate);
-  result->SetInternalFieldCount(1);
-  result->SetAccessor(String::NewFromUtf8Literal(isolate, "path", NewStringType::kInternalized), GetPath);
-  return handle_scope.Escape(result);
-}
 
 void HttpRequestProcessor::Log(const char* event) {
   printf("Logged: %s\n", event);
 }
-
-class StringHttpRequest: public HttpRequest {
-public:
-  StringHttpRequest(const string& path);
-  virtual const string& Path() { return path_; }
-private:
-  string path_;
-};
-StringHttpRequest::StringHttpRequest(const string& path):path_(path) {}
-
-const int kSampleSize = 6;
-StringHttpRequest kSampleRequests[kSampleSize] = {
-  StringHttpRequest("/process.cc"),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          )
-};
 
 void ParseOptions(int argc, char* argv[], StringStringMap* options, string* file) {
   for (int i = 0; i < argc; i++) {
@@ -332,17 +232,6 @@ void PrintMap(StringStringMap* m) {
   }
 }
 
-bool ProcessEntries(Isolate* isolate, v8::Platform* platform,
-                    HttpRequestProcessor* processor,
-                    int count, StringHttpRequest* reqs) {
-  for (int i = 0; i < count; i++) {
-    bool result = processor->Process(&reqs[i]);
-    while (v8::platform::PumpMessageLoop(platform, isolate)) continue;
-    if (!result) return false;
-  }
-  return true;
-}
-
 int main(int argc, char* argv[]) {
   v8::V8::InitializeICUDefaultLocation(argv[0]);
   v8::V8::InitializeExternalStartupData(argv[0]);
@@ -371,9 +260,6 @@ int main(int argc, char* argv[]) {
   StringStringMap output;
   if (!processor.Initialize(&options, &output)) {
     fprintf(stderr, "Error initializing processor.\n");
-    return 1;
-  }
-  if (!ProcessEntries(isolate, platform.get(), &processor, kSampleSize, kSampleRequests)) {
     return 1;
   }
   PrintMap(&output);
