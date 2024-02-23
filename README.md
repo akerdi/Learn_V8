@@ -41,6 +41,8 @@ Language: C++
   设置防火墙去Allow app，类似上面的参考文章设置防火墙规则，设置后还是失败。\
   此时打开V2rayx - Configure 将 UDP Support 和Share Over Lan 打开后最终链接成功。如下图:
 
+> 如果觉得apt 下载太慢？可以复用VPN 复用方法[如链接](https://github.com/microsoft/WSL/issues/1570#issuecomment-271531911)
+
 ![wsl_proxy_windows_v2rayx](./assets/wsl_proxy_windows_v2rayx.jpg)
 
 接下来下载相关工具, 先执行: `$gclient`.(不带参数，该步骤更新depot_tool 工具)
@@ -52,11 +54,15 @@ gclient 完成如图:
 ### 2.2获取源码
 
     mkdir v8 && cd v8
-    fetch v8
+    fetch v8 // 如果遇到错，则直接执行 gclient sync 即可
 
-切到对应的版本:
+想要对应版本时可以进行切换:
 
-    git branch -a && git checkout -b branch-heads/12.0 remotes/branch-heads/12.0
+    git branch -a && git checkout -b branch-heads/12.0 remotes/origin/12.0
+
+安装构建依赖项(linux 系统需要，只需要执行一次):
+
+    ./build/install-build-deps.sh
 
 ### 2.3编译d8
 
@@ -79,7 +85,11 @@ d8 是V8引擎用于展示V8功能的executable app，编译他是为了尝试�
 
 ![v8_gen_list](./assets/v8_gen_list.jpg)
 
-比如我们要编译x64.release 架构，则执行:
+生成目标平台必须的构建文件(Generate the necessary build files by executing the following in your terminal/shell):
+
+    v8gen x64.release
+
+编译x64.release 架构，则执行:
 
     ninja -C out/x64.release
 
