@@ -34,7 +34,16 @@ Language: C++
 
 这里的$IP 值是: `cat /etc/resolv.conf` 中的namespace 项目。(注意http 和socks5 端口对应)
 
-接下来下载相关工具: `gclient`.
+> 如果没有科学上网工具，则可以使用[站长之家网站](https://tool.chinaz.com/dns/chromium.googlesource.com) 或者其他域名找IP的方案，得到域名。然后如 `echo "108.177.97.82 chromium.googlesource.com" >> /etc/hosts` 来强制修改可打开的网站。
+
+> 设置Ubuntu - WSL 使用Windows 的V2rayx 来proxy 请求，发现总是失败，报网络问题。\
+  `$curl https://news.ycombinator.com -v` 显示确实转向Windows 的v2rayx. 再测试Windows 的python3 -m http.server 然后`$telnet $IP 8000` 能联通说明双方都没问题。\
+  设置防火墙去Allow app，类似上面的参考文章设置防火墙规则，设置后还是失败。\
+  此时打开V2rayx - Configure 将 UDP Support 和Share Over Lan 打开后最终链接成功。如下图:
+
+![wsl_proxy_windows_v2rayx](./assets/wsl_proxy_windows_v2rayx.jpg)
+
+接下来下载相关工具, 先执行: `$gclient`.(不带参数，该步骤更新depot_tool 工具)
 
 gclient 完成如图:
 
