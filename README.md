@@ -32,7 +32,12 @@ Language: C++
     git config --global http.proxy $IP:8001
     git config --global https.proxy $IP:8001
 
-这里的$IP 值是: `cat /etc/resolv.conf` 中的namespace 项目。(注意http 和socks5 端口对应)
+这里的$IP 值是: `cat /etc/resolv.conf` 中的namespace 项目。(注意http 和socks5 端口对应, 我这里的VPN设置http端口为8001)
+
+以上是设置git 的信息，而如果是设置整个wsl terminal 的联网，则设置:
+
+    export http_proxy=$IP:8001
+    export https_proxy=$IP:8001
 
 > 如果没有科学上网工具，则可以使用[站长之家网站](https://tool.chinaz.com/dns/chromium.googlesource.com) 或者其他域名找IP的方案，得到域名。然后如 `echo "108.177.97.82 chromium.googlesource.com" >> /etc/hosts` 来强制修改可打开的网站。
 
@@ -91,7 +96,13 @@ d8 是V8引擎用于展示V8功能的executable app，编译他是为了尝试�
 
 编译x64.release 架构，则执行:
 
-    ninja -C out/x64.release
+    ninja -C out.gn/x64.release
+
+由于我们是要开发测试，并且使用libv8_monolith, 那么执行:
+
+    ninja -C out.gn/x64.release.sample v8_monolith
+
+这个x64.release.sample 正是 `v8gen list` 列出的其中一个平台.
 
 最终结果在:
 
@@ -815,5 +826,6 @@ int main(int argc, char* argv[]) {
 [如何正确地使用v8嵌入到我们的C++应用中](https://juejin.cn/post/6844903956125057031)
 
 [V8 相关整理](https://zhuanlan.zhihu.com/p/399822509)
+[从嵌入V8开始（译）](https://zhuanlan.zhihu.com/p/394547532)
 
 [nodesource resource](https://v8docs.nodesource.com/node-4.8/d2/d5c/classv8_1_1_map.html)
