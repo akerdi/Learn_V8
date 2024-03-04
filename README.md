@@ -100,6 +100,7 @@ d8 是V8引擎用于展示V8功能的executable app，编译他是为了尝试�
 
 由于我们是要开发测试，并且使用libv8_monolith, 那么执行:
 
+    v8gen x64.release.sample
     ninja -C out.gn/x64.release.sample v8_monolith
 
 这个x64.release.sample 正是 `v8gen list` 列出的其中一个平台.
@@ -136,9 +137,20 @@ target_link_libraries(app -lpthread -lv8_monolith -lv8_libbase -lv8_libplatform)
 
 重点是指定将头文件和静态库加入到项目中。(项目外可能导致编译问题)。
 
+> 这里特别说明，编译并link时需要附带 `-ldl` 库, 此库在第二次换新电脑编译时报错缺少这个库，并且需要附加`CMAKE_CXX_FLAGS` 一个新的options `-Wl,--no-as-needed`，如下边修改:
+
+```diff
+-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX")
++set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DV8_COMPRESS_POINTERS -DV8_ENABLE_SANDBOX -Wl,--no-as-needed")
+-target_link_libraries(app -lpthread -lv8_monolith -lv8_libbase -lv8_libplatform)
++target_link_libraries(app -ldl -lpthread -lv8_monolith -lv8_libbase -lv8_libplatform)
+```
+
 ## 4.测试
 
 测试使用V8自带的3个例子: /samples/[hello-world.cc|shell.cc|process.cc].
+
+> 直接使用main.cpp 作为测试时，其为tech/6.3processon_process.cpp 的例子，需要提供输入js文件。此时运行 ./app count-hosts.js， 或者在VSCode 编辑其中Debug，按F5启动，参数args在.vscode/launch.json 的args 中解开注释"count-hosts.js".
 
 ## 5.学习使用
 
