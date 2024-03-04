@@ -259,7 +259,7 @@ StringHttpRequest kSampleRequests[kSampleSize] = {
 };
 
 void ParseOptions(int argc, char* argv[], StringStringMap* options, string* file) {
-  for (int i = 0; i < argc; i++) {
+  for (int i = 1; i < argc; i++) {
     string str = argv[i];
     size_t s = str.find('=', 0);
     if (s == string::npos) {
