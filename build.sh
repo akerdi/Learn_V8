@@ -1,25 +1,18 @@
 #!/bin/bash
 
 # ./build [build-type]
-# <build-type> Could be one of [Debug|Release]
+# <build-type> Could be one of [Debug|Release], Default "Release"
 
 BUILD_DIR=cmake-build
-
+BUILD_TYPE=Release
 if [ "$1" ]; then
   if [ "$1" == "Debug" ]; then
-    BUILD_DIR="$BUILD_DIR-debug"
-  else
-    BUILD_DIR="$BUILD_DIR-release"
+    BUILD_TYPE=Debug
   fi
-else
-  BUILD_DIR="$BUILD_DIR-debug"
 fi
 
-COMPILER_OPT="cmake -S . -B $BUILD_DIR"
-
-if [ "$1" ]; then
-  COMPOLER_OPT="$COMPILER_OPT -DCMAKE_BUILD_TYPE=$1"
-fi
+COMPILER_OPT="cmake -S . -B $BUILD_DIR-$BUILD_TYPE"
+COMPILER_OPT="$COMPILER_OPT -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 
 eval $COMPILER_OPT
-cmake --build $BUILD_DIR
+cmake --build $BUILD_DIR-$BUILD_TYPE --verbose

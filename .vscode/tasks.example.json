@@ -7,9 +7,9 @@
       {
           "label": "build_standalone",
           "type": "shell",
-          "command": "sh",
+          "command": "./build.sh",
           "args": [
-            "build.sh"
+            "Debug"
           ]
       },
       {

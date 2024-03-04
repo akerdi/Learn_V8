@@ -146,6 +146,8 @@ target_link_libraries(app -lpthread -lv8_monolith -lv8_libbase -lv8_libplatform)
 +target_link_libraries(app -ldl -lpthread -lv8_monolith -lv8_libbase -lv8_libplatform)
 ```
 
+> 另外需要编译Release 库时，操作为在terminal 中执行 `./build.sh Release`. 按F5进行debug 执行的是 `./build.sh Debug`, 也可以更换launch.json - preLaunchTask 的值"build_standalone" 为 "CMake Build", 功能完全一样(参考.vscode/launch.example.json)。
+
 ## 4.测试
 
 测试使用V8自带的3个例子: /samples/[hello-world.cc|shell.cc|process.cc].
