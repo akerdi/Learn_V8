@@ -464,6 +464,7 @@ ProcessOn Sample 和之前 Hello World 和 Shell 的Sample 差不多的模板，
 开始的读取文件Readfile:
 
 ```cpp
+// retrive data by set return param `MaybeLocal<Some type>`
 MaybeLocal<String> Readfile(Isolate* isolate, const string& name) {
   FILE* file = fopen(name.c_str(), "rb");
   if (file == NULL) {
@@ -502,6 +503,7 @@ static void LogCallback(const v8::FunctionCallbackInfo<Value>& info) {
   Local<Value> arg = info[0];
   if (arg->IsMap()) { // 识别js的map
     Local<Map> aMap = arg.As<Map>();
+    // aMap->AsArray() 转化为aArray 而不是 aMap.As<Map>()
     Local<Array> array = aMap->AsArray();
     uint32_t length = array->Length();
     uint32_t halfLength = length / 2;
@@ -546,6 +548,8 @@ bool JsHttpRequestProcessor::Initialize(StringStringMap* opts, StringStringMap* 
   context_.Reset(GetIsolate(), context);
 
   // 由于上下文修改了，这一句则会进入这个新的上下文。这样的话，接下来所有的操作都会在这个Context::Scope 中。
+  // 如果不设置Context::Scope 则无法在Isolate 中将context 绑定为全局
+  // 这样会导致GetIsolate()->GetCurrentContext() context为空: context.IsEmpty() == true
   Context::Scope context_scope(context);
 
   // 将opts 和output 这两个map 映射到js中来使用
