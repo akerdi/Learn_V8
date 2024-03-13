@@ -663,77 +663,77 @@ void JsHttpRequestProcess::MapSet(Local<Name> name, Local<Value> value_obj, cons
 
 这个阶段是准备阶段，准备好了 request 的模板创建方法:
 
-```cpp
-class HttpRequest {
-public:
- virtual ~HttpRequest() {}
- virtual const string& Path() = 0;
-};
-// class HttpRequestProcessor {
-// private:
-// + Local<Object> WrapRequest(HttpRequest* obj);
-// + static HttpRequest* UnwrapRequest(Local<Object> obj);
-// + static void GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info);
-// + static Local<ObjectTemplate> MakeRequestTemplate(Isolate* isolate);
-
-// + static Global<ObjectTemplate> request_template_;
-// };
-Global<ObjectTemplate> JsHttpRequestProcessor::request_template_;
-Local<Object> JsHttpRequestProcessor::WrapRequest(HttpRequest* request) {
-  EscapableHandleScope handle_scope(GetIsolate());
-
-  if (request_template_.IsEmpty()) {
-    Local<ObjectTemplate> raw_template = MakeRequestTemplate(GetIsolate());
-    request_template_.Reset(GetIsolate(), raw_template);
-  }
-  Local<ObjectTemplate> templ = Local<ObjectTemplate>::New(GetIsolate(), request_template_);
-  Local<Object> result = templ->NewInstance(GetIsolate()->GetCurrentContext()).ToLocalChecked();
-  Local<External> request_ptr = External::New(GetIsolate(), request);
-  result->SetInternalField(0, request_ptr);
-  return handle_scope.Escape(result);
-}
-HttpRequest* JsHttpRequestProcessor::UnwrapRequest(Local<Object> obj) {
-  Local<External> field = obj->GetInternalField(0).As<Value>().As<External>();
-  void* ptr = field->Value();
-  return static_cast<HttpRequest*>(ptr);
-}
-void JsHttpRequestProcessor::GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info) {
-  HttpRequest* request = UnwrapRequest(info.Holder());
-  const string& path = request->Path();
-  info.GetReturnValue().Set(
-    String::NewFromUtf8(
-      info.GetIsolate(),
-      path.c_str(),
-      NewStringType::kInternalized,
-      static_cast<int>(path.length())
-    ).ToLocalChecked()
-  );
-}
-Local<ObjectTemplate> JsHttpRequestProcessor::MakeRequestTemplate(Isolate* isolate) {
-  EscapableHandleScope handle_scope(isolate);
-  Local<ObjectTemplate> result = ObjectTemplate::New(isolate);
-  result->SetInternalFieldCount(1);
-  result->SetAccessor(String::NewFromUtf8Literal(isolate, "path", NewStringType::kInternalized), GetPath);
-  return handle_scope.Escape(result);
-}
-class StringHttpRequest: public HttpRequest {
-public:
-  StringHttpRequest(const string& path);
-  virtual const string& Path() { return path_; }
+```diff
++class HttpRequest {
++public:
++ virtual ~HttpRequest() {}
++ virtual const string& Path() = 0;
++};
+class JsHttpRequestProcessor: public HttpRequestProcessor {
 private:
-  string path_;
-};
-StringHttpRequest::StringHttpRequest(const string& path):path_(path) {}
++ Local<Object> WrapRequest(HttpRequest* obj);
++ static HttpRequest* UnwrapRequest(Local<Object> obj);
++ static void GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info);
++ static Local<ObjectTemplate> MakeRequestTemplate(Isolate* isolate);
 
-const int kSampleSize = 6;
-StringHttpRequest kSampleRequests[kSampleSize] = {
-  StringHttpRequest("/process.cc"),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          ),
-  StringHttpRequest("/"          )
++ static Global<ObjectTemplate> request_template_;
 };
++Global<ObjectTemplate> JsHttpRequestProcessor::request_template_;
++Local<Object> JsHttpRequestProcessor::WrapRequest(HttpRequest* request) {
++ EscapableHandleScope handle_scope(GetIsolate());
+
++ if (request_template_.IsEmpty()) {
++   Local<ObjectTemplate> raw_template = MakeRequestTemplate(GetIsolate());
++   request_template_.Reset(GetIsolate(), raw_template);
++ }
++ Local<ObjectTemplate> templ = Local<ObjectTemplate>::New(GetIsolate(), request_template_);
++ Local<Object> result = templ->NewInstance(GetIsolate()->GetCurrentContext()).ToLocalChecked();
++ Local<External> request_ptr = External::New(GetIsolate(), request);
++ result->SetInternalField(0, request_ptr);
++ return handle_scope.Escape(result);
++}
++HttpRequest* JsHttpRequestProcessor::UnwrapRequest(Local<Object> obj) {
++ Local<External> field = obj->GetInternalField(0).As<Value>().As<External>();
++ void* ptr = field->Value();
++ return static_cast<HttpRequest*>(ptr);
++}
++void JsHttpRequestProcessor::GetPath(Local<String> name, const PropertyCallbackInfo<Value>& info) {
++ HttpRequest* request = UnwrapRequest(info.Holder());
++ const string& path = request->Path();
++ info.GetReturnValue().Set(
++   String::NewFromUtf8(
++     info.GetIsolate(),
++     path.c_str(),
++     NewStringType::kInternalized,
++     static_cast<int>(path.length())
++   ).ToLocalChecked()
++ );
++}
++Local<ObjectTemplate> JsHttpRequestProcessor::MakeRequestTemplate(Isolate* isolate) {
++ EscapableHandleScope handle_scope(isolate);
++ Local<ObjectTemplate> result = ObjectTemplate::New(isolate);
++ result->SetInternalFieldCount(1);
++ result->SetAccessor(String::NewFromUtf8Literal(isolate, "path", NewStringType::kInternalized), GetPath);
++ return handle_scope.Escape(result);
++}
++class StringHttpRequest: public HttpRequest {
++public:
++ StringHttpRequest(const string& path);
++ virtual const string& Path() { return path_; }
++private:
++ string path_;
++};
++StringHttpRequest::StringHttpRequest(const string& path):path_(path) {}
+
++const int kSampleSize = 6;
++StringHttpRequest kSampleRequests[kSampleSize] = {
++ StringHttpRequest("/process.cc"),
++ StringHttpRequest("/"          ),
++ StringHttpRequest("/"          ),
++ StringHttpRequest("/"          ),
++ StringHttpRequest("/"          ),
++ StringHttpRequest("/"          )
++};
 ```
 
 以上完成了request 的映射。
